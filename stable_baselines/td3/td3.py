@@ -186,6 +186,11 @@ class TD3(OffPolicyRLModel):
 
                     qvalues_losses = qf1_loss + qf2_loss
 
+                    # Q Values optimizer
+                    qvalues_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
+                    qvalues_params = tf_util.get_trainable_vars('model/values_fn/')
+                    train_values_op = qvalues_optimizer.minimize(qvalues_losses, var_list=qvalues_params)
+
                     # Policy loss: maximise q value
                     self.policy_loss = policy_loss = -tf.reduce_mean(qf1_pi)
 
@@ -193,22 +198,20 @@ class TD3(OffPolicyRLModel):
                     # will be called only every n training steps,
                     # where n is the policy delay
                     policy_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
-                    policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
+                    with tf.control_dependencies([train_values_op]):
+                        policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
                     self.policy_train_op = policy_train_op
-
-                    # Q Values optimizer
-                    qvalues_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
-                    qvalues_params = tf_util.get_trainable_vars('model/values_fn/')
 
                     # Q Values and policy target params
                     source_params = tf_util.get_trainable_vars("model/")
                     target_params = tf_util.get_trainable_vars("target/")
 
                     # Polyak averaging for target variables
-                    self.target_ops = [
-                        tf.assign(target, (1 - self.tau) * target + self.tau * source)
-                        for target, source in zip(target_params, source_params)
-                    ]
+                    with tf.control_dependencies([self.policy_train_op]):
+                        self.target_ops = [
+                            tf.assign(target, (1 - self.tau) * target + self.tau * source)
+                            for target, source in zip(target_params, source_params)
+                        ]
 
                     # Initializing target to match source variables
                     target_init_op = [
@@ -216,7 +219,7 @@ class TD3(OffPolicyRLModel):
                         for target, source in zip(target_params, source_params)
                     ]
 
-                    train_values_op = qvalues_optimizer.minimize(qvalues_losses, var_list=qvalues_params)
+
 
                     self.infos_names = ['qf1_loss', 'qf2_loss']
                     # All ops to call during one training step
